@@ -214,18 +214,18 @@ class LPModel:
             size = len(self.units.keys())
             vstates = self.last_run["states"][:,:size]
             times = self.last_run["times"]
-            cstates = []
+            pstates = []
             for key in self.units.keys():
                 unit = self.units[key]
                 if unit.nonlinear[1]:
                     statevector = []
                     for i, t in enumerate(times):
                         statevector.append(unit.C(vstates[:,key][i], t=t))
-                    cstates.append(np.array(statevector))
+                    pstates.append(np.array(statevector)) # This is a vector of pressures
                 else:
-                    cstates.append(unit.C*np.ones_like(times))
+                    pstates.append(vstates[:,key]/unit.C*np.ones_like(times))
         
-        return [vstates[:,i]/cstates[i] for i in range(size)]
+        return pstates
 
 
 class LPunit:
