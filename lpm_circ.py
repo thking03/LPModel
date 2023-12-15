@@ -120,13 +120,15 @@ class LPModel:
                 # Get the concentration of the unit
                 this_conc = mols[ni]/this_vol
 
-                # Flow ... need to integrate the diodes for later
-                # Also need to fix concentration flows BECAUSE directionality matters more here
+                # Get derivatives
                 total_flow = 0.0 # total flow is derivative of volume
                 total_mass_flow = 0.0 # total mass flow is the derivative of number
+                
                 if this_unit.Diff:
                     total_mass_flow += this_unit.dfunc(t, this_conc)
+                
                 for prev_id in this_unit.prev:
+                    diode_state = True # Reset the diode state for next calculation
                     # Get pressure of previous unit
                     if unit_dict[prev_id].nonlinear[1]:
                         prev_P = unit_dict[prev_id].C(vols[prev_id], t=t) # All our PV equations RETURN P
@@ -139,12 +141,22 @@ class LPModel:
                         inflow = (prev_P - this_P)/unit_dict[prev_id].R(vols[prev_id], t=t)
                     else:
                         inflow = (prev_P - this_P)/unit_dict[prev_id].R
-                    total_flow += inflow
+
+                    # Solve for the diode state & do bulk fluid flow tracking
+                    if unit_dict[prev_id].D_out and t > 0:
+                        diode_state = prev_P > this_P # Sets the bool to true if flow goes the right way
+                        # print("Got diode state: {} for unit {} at {} mmHg and unit {} at {} mmHg .".format(diode_state, key, this_P, prev_id, prev_P))
+                    total_flow += inflow*diode_state # No flow if bool is false bc of valve
+                    
+                    # Do solute number tracking
                     if inflow >= 0: # This means flow is from previous unit INTO this unit
-                        total_mass_flow += inflow*prev_conc
+                        total_mass_flow += inflow*prev_conc*diode_state
                     else:
-                        total_mass_flow += inflow*this_conc
+                        total_mass_flow += inflow*this_conc*diode_state
+
+                    
                 for next_id in this_unit.after:
+                    diode_state = True # Reset the diode state for next calculation
                     # Get pressure of next unit
                     if unit_dict[next_id].nonlinear[1]:
                         next_P = unit_dict[next_id].C(vols[next_id], t=t) # All our PV equations RETURN P
@@ -157,11 +169,19 @@ class LPModel:
                         outflow = (this_P - next_P)/this_unit.R(this_vol, t=t)
                     else:
                         outflow = (this_P - next_P)/this_unit.R
-                    total_flow -= outflow
+
+                    # Solve for the diode state & do bulk fluid flow tracking
+                    if this_unit.D_out and t > 0:
+                        diode_state = this_P > next_P # Sets the bool to true if flow goes the right way
+                        # print("Got diode state: {} for unit {} at {} mmHg and unit {} at {} mmHg .".format(diode_state, key, this_P, next_id, next_P))
+                    total_flow -= outflow*diode_state
+
+                    # Do solute number tracking
                     if outflow >= 0: # This means flow is from this unit INTO next unit
-                        total_mass_flow -= outflow*this_conc
+                        total_mass_flow -= outflow*this_conc*diode_state
                     else:
-                        total_mass_flow -= outflow*next_conc
+                        total_mass_flow -= outflow*next_conc*diode_state
+                
                 # print("DIAGNOSTIC: for step {}: unit {} has Q = {}".format(t, key, total_flow))
                 dvs.append(total_flow)
                 dns.append(total_mass_flow)
@@ -186,19 +206,38 @@ class LPModel:
             vstates = self.last_run["states"][:,:size]
             nstates = self.last_run["states"][:, size:]
             return [nstates[:,i]/vstates[:,i] for i in range(size)]
+    
+    def get_pressures(self):
+        if not hasattr(self, "last_run"):
+            print("Model has not been run yet. Please run model using self.solve_model().")
+        else:
+            size = len(self.units.keys())
+            vstates = self.last_run["states"][:,:size]
+            times = self.last_run["times"]
+            cstates = []
+            for key in self.units.keys():
+                unit = self.units[key]
+                if unit.nonlinear[1]:
+                    statevector = []
+                    for i, t in enumerate(times):
+                        statevector.append(unit.C(vstates[:,key][i], t=t))
+                    cstates.append(np.array(statevector))
+                else:
+                    cstates.append(unit.C*np.ones_like(times))
+        
+        return [vstates[:,i]/cstates[i] for i in range(size)]
 
 
 class LPunit:
     # A unit in the lumped parameter model
 
-    def __init__(self, id, R, C=0, L=0, D_in=False, D_out=False, links=None, diffusive_region=False, name=None, ics=None):
+    def __init__(self, id, R, C=0, L=0, D_out=False, links=None, diffusive_region=False, name=None, ics=None):
         # Assign the three standard LINEAR parameters
         self.id = id # use to uniquely identify the unit in the LPM -- maybe could build in some type autonumbering later...?
         self.R = R # There must be vessel resistance
         self.C = C # If this is zero, there is no vessel elastance
         self.L = L # If this is zero, there is no inductance
-        self.D_in = D_in # If this is False, there is no valve BEFORE this unit
-        self.D_out = D_out # If this is False, there is no valve AFTER this unit
+        self.D_out = D_out # If this is False, there is no valve leaving this unit
         self.Diff = diffusive_region # If this is False, there is NO DIFFUSION into the unit from an outside source
         self.nonlinear = [False, False, False]
 
@@ -245,7 +284,7 @@ class LPunit:
 # Key parameters
 HR = 60 # Heart rate
 [A0, B0, C0] = [0.9, 0.038, 0.145] # Activation functions for the heart
-[A, B, C] = [[0.3, 0.35, 0.5, 0.55], [0.045, 0.035, 0.037, 0.036], [0.275, 0.33, 0.375, 0.4]] # Activation functions for the heart
+[Aa, Ba, Ca] = [[0.3, 0.35, 0.5, 0.55], [0.045, 0.035, 0.037, 0.036], [0.275, 0.33, 0.375, 0.4]] # Activation functions for the heart
 [amin, bmin, ka, kb] = [-2, 0.7, 7, 0.5] # Acivation functions for the heart
 [E_esla, E_eslv, E_esra, E_esrv] = [0.3, 4.3, 0.3, 0.8] # Elastances at end-systolic
 [M_la, M_lv, M_ra, M_rv] = [0.5, 1.7, 0.5, 0.67] 
@@ -263,7 +302,7 @@ HR = 60 # Heart rate
 def etvfunc(t, A, B, C, right=False):
     atv = 0 
     for i in range(4):
-        atv += A[i] * np.exp(-((bmin+kb*f_con)*(t%(60/HR)-(C[i]+right*.013))/B[i])**2)
+        atv += A[i] * np.exp(-(((bmin+kb*f_con)*(t%(60/HR))-(C[i]+right*.013))/B[i])**2)
     return atv
 
 def etafunc(t, A0, B0, C0, right=False):
@@ -271,25 +310,25 @@ def etafunc(t, A0, B0, C0, right=False):
 
 def pvt_lv(vol, t):
     pES = (amin+ka*f_con)*E_eslv*(vol-v_dlv)
-    pED = M_lv*np.abs(np.exp(l_lv*(vol-v_0lv)-1))
-    etvl = etvfunc(t, A, B, C)
+    pED = M_lv*np.abs(np.exp(l_lv*(vol-v_0lv))-1)
+    etvl = etvfunc(t, Aa, Ba, Ca)
     return etvl*pES + (1-etvl)*pED
 
 def pvt_rv(vol, t):
     pES = (amin+ka*f_con)*E_esrv*(vol-v_drv)
-    pED = M_rv*np.abs(np.exp(l_rv*(vol-v_0rv)-1))
-    etvr = etvfunc(t, A, B, C, right=True)
+    pED = M_rv*np.abs(np.exp(l_rv*(vol-v_0rv))-1)
+    etvr = etvfunc(t, Aa, Ba, Ca, right=True)
     return etvr*pES + (1-etvr)*pED
 
 def pvt_la(vol, t):
     pES = E_esla*(vol-v_dla)
-    pED = M_la*np.abs(np.exp(l_la*(vol-v_0la)-1))
+    pED = M_la*np.abs(np.exp(l_la*(vol-v_0la))-1)
     etal = etafunc(t, A0, B0, C0)
     return etal*pES + (1-etal)*pED
 
 def pvt_ra(vol, t):
     pES = E_esra*(vol-v_dra)
-    pED = M_ra*np.abs(np.exp(l_ra*(vol-v_0ra)-1))
+    pED = M_ra*np.abs(np.exp(l_ra*(vol-v_0ra))-1)
     etar = etafunc(t, A0, B0, C0, right=True)
     return etar*pES + (1-etar)*pED
 
