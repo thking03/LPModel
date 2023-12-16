@@ -100,7 +100,7 @@ L = R_c*2 #cm; diameter of the capillary
 Pe = L*v / Dij
 
 # Model cigarette "puffing"
-NUM_ZEROS = 46000
+NUM_ZEROS = 46000 # This corresponds to 46 seconds in between puffs
 max_molarity = 1.12*10**-6 #units mol/Liter
 window = (max_molarity)*signal.windows.general_gaussian(2000, p=1.5, sig=800) #time in ms
 offtime = np.zeros(NUM_ZEROS)
@@ -112,9 +112,22 @@ offtime2 = np.zeros(2000)
 co_onepuff = np.concatenate([offtime2, window2, offtime2])
 time_onepuff = np.linspace(0, len(co_onepuff), len(co_onepuff)+1)
 
+def get_cigalv_conc(t, num_puffs = 10, max_molarity=1.12*10**-6):
+    if t < 10:
+        return 0
+    elif (t-38)//48 > num_puffs:
+        return 0
+    else:
+        t_mod = ((t-38) % 48) - 2
+        return max_molarity*np.e**(-0.5*np.abs((t_mod/.8)**(2*1.5)))
+
 # Define Flux equation
-def calculate_flux(Dij, Co, R_c, Pe, z_cap):
+def calc_cig_flux(Co, Dij=Dij, R_c=R_c, Pe=Pe, z_cap=z_cap):
     return (((0.6783 * Dij * Co) / R_c) * (Pe * (R_c / z_cap))**(1/3))
+
+# Define total diffusion equations
+def cig_diffusion(t, conc):
+    return (100*100)**2*calc_cig_flux(get_cigalv_conc(t))
 
 # Define uptake equation
 def calculate_uptake(Co1, t):

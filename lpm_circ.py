@@ -44,6 +44,10 @@ class LPModel:
             graph.append(this_unit.id, this_unit.after)
         return graph
 
+    def solute_settings(kD):
+        # Use solute setting to enable and disable decay of the solute
+        self.kD = kD
+
     def solve_model(self, dt, T):
         # dt is the number of time steps per second.
         # T is the number of seconds to run for
@@ -95,6 +99,11 @@ class LPModel:
             #    l0.append(unit_dict[key].lstate)
             n0.append(unit_dict[key].nstate)
         
+        if hasattr(self, "kD"):
+            decayrate = kD
+        else:
+            decayrate = 0
+
         def calc_derivative(y, t):
             vols = y[:len(v0)] # Get volumes
             ls = y[len(v0):len(v0)+len(l0)] # Get inductances
@@ -181,6 +190,8 @@ class LPModel:
                         total_mass_flow -= outflow*this_conc*diode_state
                     else:
                         total_mass_flow -= outflow*next_conc*diode_state
+
+                total_mass_flow -= decayrate*this_conc # First-order decay kinetics
                 
                 # print("DIAGNOSTIC: for step {}: unit {} has Q = {}".format(t, key, total_flow))
                 dvs.append(total_flow)
