@@ -77,11 +77,9 @@ def calculate_zyn_flux(D, gradient):
 
 # Mass transfer across membrane:
 def zyn_diffusion(t, conc):
-    grad_interface = concentration_gradient(0, t, D_zyn, L, C0z)
-    print(grad_interface)
+    grad_interface = concentration_gradient(L, t, D_zyn, L, C0z)
     flux = calculate_zyn_flux(D_zyn, grad_interface)
-    print(flux)
-    return .014*.028*flux 
+    return .014*.028*flux
 
 ### Cigarettes and Vapes
 # Constants
@@ -126,8 +124,9 @@ def calc_cig_flux(Co, Dij=Dij, R_c=R_c, Pe=Pe, z_cap=z_cap):
     return (((0.6783 * Dij * Co) / R_c) * (Pe * (R_c / z_cap))**(1/3))
 
 # Define total diffusion equations
+# 50 square meters per lung
 def cig_diffusion(t, conc):
-    return (100*100)**2*calc_cig_flux(get_cigalv_conc(t))
+    return (50*100)**2*calc_cig_flux(get_cigalv_conc(t))
 
 # Define uptake equation
 def calculate_uptake(Co1, t):

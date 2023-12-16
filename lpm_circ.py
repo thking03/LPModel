@@ -15,9 +15,8 @@ TO-DO:
     - Figure out how to extract flow and pressure parameters from the model
 """
 
-import numpy as np
-from scipy.integrate import odeint
-
+import numpy as np # math
+from scipy.integrate import odeint # solver method
 
 # Class definitions to easily create models
 
@@ -25,7 +24,7 @@ class LPModel:
     # A dictionary of LPM units of variothius types
 
     def __init__(self):
-        self.units = {}
+        self.units ={}
         pass
 
     def add_unit(self, unit):
@@ -44,7 +43,7 @@ class LPModel:
             graph.append(this_unit.id, this_unit.after)
         return graph
 
-    def solute_settings(kD):
+    def solute_settings(self, kD):
         # Use solute setting to enable and disable decay of the solute
         self.kD = kD
 
@@ -91,34 +90,36 @@ class LPModel:
         #   - We also use the flow terms to do diffusion.
         
         v0 = [] # Initial conditions for volume
-        l0 = [] # Initial conditions for inductor flow
+        #l0 = [] # Initial conditions for inductor flow
         n0 = [] # Initial conditions for diffusion (we track number per compartment and calc. concentration dynamically)
         for key in order:
             v0.append(unit_dict[key].vstate)
-            # if unit_dict[key].L != 0:
+            #if unit_dict[key].L != 0:
             #    l0.append(unit_dict[key].lstate)
             n0.append(unit_dict[key].nstate)
-        
+        ics = np.array(v0 + n0)
+
         if hasattr(self, "kD"):
-            decayrate = kD
+            decayrate = self.kD
         else:
             decayrate = 0
 
         def calc_derivative(y, t):
-            vols = y[:len(v0)] # Get volumes
-            ls = y[len(v0):len(v0)+len(l0)] # Get inductances
-            mols = y[len(v0)+len(l0):] # Get current number of molecules
-            dvs = []
-            dls = []
-            dns = []
-            vi = 0
-            li = 0
-            ni = 0
-            
+            # Get the current state
+            vols = y[:len(v0)]
+            #ls = y[len(v0):len(v0)+len(l0)]
+            mols = y[len(v0):]
+
+            # Store derivatives here
+            dvs = np.zeros_like(vols) 
+            #dls = np.zeros_like(ls)
+            dns = np.zeros_like(mols)
+
             # This does all flow
             for key in order:
                 this_unit = unit_dict[key] # access
-                this_vol = vols[vi]
+                access_int = int(key)
+                this_vol = vols[access_int]
 
                 # Get pressure of this unit
                 if this_unit.nonlinear[1]:
@@ -127,7 +128,7 @@ class LPModel:
                     this_P = this_vol/this_unit.C
 
                 # Get the concentration of the unit
-                this_conc = mols[ni]/this_vol
+                this_conc = mols[access_int]/this_vol
 
                 # Get derivatives
                 total_flow = 0.0 # total flow is derivative of volume
@@ -136,7 +137,10 @@ class LPModel:
                 if this_unit.Diff:
                     total_mass_flow += this_unit.dfunc(t, this_conc)
                 
-                for prev_id in this_unit.prev:
+                prevs = this_unit.prev
+                afters = this_unit.after
+
+                for prev_id in prevs:
                     diode_state = True # Reset the diode state for next calculation
                     # Get pressure of previous unit
                     if unit_dict[prev_id].nonlinear[1]:
@@ -163,8 +167,7 @@ class LPModel:
                     else:
                         total_mass_flow += inflow*this_conc*diode_state
 
-                    
-                for next_id in this_unit.after:
+                for next_id in afters:
                     diode_state = True # Reset the diode state for next calculation
                     # Get pressure of next unit
                     if unit_dict[next_id].nonlinear[1]:
@@ -191,20 +194,17 @@ class LPModel:
                     else:
                         total_mass_flow -= outflow*next_conc*diode_state
 
-                total_mass_flow -= decayrate*this_conc # First-order decay kinetics
+                total_mass_flow -= decayrate*this_conc*this_vol # First-order decay kinetics
                 
                 # print("DIAGNOSTIC: for step {}: unit {} has Q = {}".format(t, key, total_flow))
-                dvs.append(total_flow)
-                dns.append(total_mass_flow)
-
-                vi +=1
-                ni +=1
+                dvs[access_int] = total_flow
+                dns[access_int] = total_mass_flow
 
             # print("DIAGNOSTIC: this step has a total volume change of {}".format(sum(dvs)))
-            return dvs + dls + dns
+            return np.concatenate((dvs, dns))
         
         t = np.linspace(0, T, int(T/dt)+1)
-        states = odeint(calc_derivative, v0 + l0 + n0, t)
+        states = odeint(calc_derivative, ics, t)
 
         self.last_run = {"states" : states, "times": t} # Save the states for other use
         return states
@@ -363,6 +363,7 @@ def pv_proxart(vol, t):
     pv_proxart_a = kc*np.log10((vol-vsap_min)/n0+1)
     pv_proxart_p = kp1*np.exp(taop*(vol-vsap_min)) + kp2*(vol-vsap_min)**2
     return f_vaso*pv_proxart_a + (1-f_vaso)*pv_proxart_p
+
 # ... also has resistance relationship
 def rv_proxart(vol, t):
     return krpsa*(np.exp(4*f_vaso)+(vsap_max/vol)**2)
