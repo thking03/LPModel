@@ -39,13 +39,25 @@ The user can then generate plots that demonstrate results, or feed the numerical
 
 ![Graph of simulation results](demograph.png)
 
-## General Overview of BBB Modeling
-The code corresponding to the modeling of transport across the blood-brain barrier is contained in the `lpm_test.ipynb` file. The last two execution blocks of of this Jupyter Notebook Conduct the required calculations to show transport, automatically set to show 50s-700s. If the model of nicotine is wished to be changed, it can be adjusted with inputs as mentioned above. The execution of the preceeding code blocks are required to make this model successful.
+## Package Structure and Requirements
+The files in this repository include basic code defining the classes and functionality along with interactive Python notebooks that demonstrate how to properly use the models for different cases and illustrating how parameters affect the model.
 
 ## Files in this package
+
 * `lpm_circ.py`: functions and class definitions associated with the lumped parameter model
 * `diff_circ.py`: functions associated with diffusion in different regions of the body
-* `lpm_test.ipynb`: interactive Python notebook that demonstrates functionality
+* `tests`: directory including four files with different diffusion methods
+    * `lpm_sensitivity.ipynb`: notebook for sensitivity analysis on physiological parameters 
+    * `lpm_test_cig.ipynb`: notebook for cigarette analysis
+    * `lpm_test_patch.ipynb`: notebook for nicotine patch analysis
+    * `lpm_test_zyn.ipynb`: notebook for Zyn analysis
+
+To run the functions associated with LPModel, one should have installed:
+* NumPy
+* SciPy
+
+## General Overview of BBB Modeling
+The code corresponding to the modeling of transport across the blood-brain barrier is contained in the `lpm_test.ipynb` file. The last two execution blocks of of this Jupyter Notebook Conduct the required calculations to show transport, automatically set to show 50s-700s. If the model of nicotine is wished to be changed, it can be adjusted with inputs as mentioned above. The execution of the preceeding code blocks are required to make this model successful.
 
 ## Encoding LPM Units
 

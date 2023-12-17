@@ -17,6 +17,7 @@ TO-DO:
 
 import numpy as np # math
 from scipy.integrate import odeint # solver method
+import time
 
 # Class definitions to easily create models
 
@@ -47,7 +48,7 @@ class LPModel:
         # Use solute setting to enable and disable decay of the solute
         self.kD = kD
 
-    def solve_model(self, dt, T):
+    def solve_model(self, dt, T, run_diagnostic=False, diagnostic_time=15, HR=60, f_con=0.5):
         # dt is the number of time steps per second.
         # T is the number of seconds to run for
         # We track the volume of each unit in time & flow through inductor if inductor exists.
@@ -104,7 +105,20 @@ class LPModel:
         else:
             decayrate = 0
 
+        HR = HR
+        f_con = f_con
+
         def calc_derivative(y, t):
+            # Timing diagnostic
+            global display
+            if run_diagnostic:
+                if t % diagnostic_time < 0.1:
+                    if display:
+                        print("Got to time {} in {} s".format(t, time.time() - start))
+                        display = False
+                elif not display:
+                    display = True
+
             # Get the current state
             vols = y[:len(v0)]
             #ls = y[len(v0):len(v0)+len(l0)]
@@ -123,7 +137,7 @@ class LPModel:
 
                 # Get pressure of this unit
                 if this_unit.nonlinear[1]:
-                    this_P = this_unit.C(this_vol, t=t) # All our PV equations RETURN P
+                    this_P = this_unit.C(this_vol, t=t, HR=HR, f_con=f_con) # All our PV equations RETURN P
                 else:
                     this_P = this_vol/this_unit.C
 
@@ -144,7 +158,7 @@ class LPModel:
                     diode_state = True # Reset the diode state for next calculation
                     # Get pressure of previous unit
                     if unit_dict[prev_id].nonlinear[1]:
-                        prev_P = unit_dict[prev_id].C(vols[prev_id], t=t) # All our PV equations RETURN P
+                        prev_P = unit_dict[prev_id].C(vols[prev_id], t=t, HR=HR, f_con=f_con) # All our PV equations RETURN P
                     else:
                         prev_P = vols[prev_id]/unit_dict[prev_id].C
                     # Get the concentration of the previous unit
@@ -171,7 +185,7 @@ class LPModel:
                     diode_state = True # Reset the diode state for next calculation
                     # Get pressure of next unit
                     if unit_dict[next_id].nonlinear[1]:
-                        next_P = unit_dict[next_id].C(vols[next_id], t=t) # All our PV equations RETURN P
+                        next_P = unit_dict[next_id].C(vols[next_id], t=t, HR=HR, f_con=f_con) # All our PV equations RETURN P
                     else:
                         next_P = vols[next_id]/unit_dict[next_id].C
                     # Get the concentration of the next unit
@@ -204,6 +218,11 @@ class LPModel:
             return np.concatenate((dvs, dns))
         
         t = np.linspace(0, T, int(T/dt)+1)
+
+        if run_diagnostic:
+            start = time.time()
+            display = True
+
         states = odeint(calc_derivative, ics, t)
 
         self.last_run = {"states" : states, "times": t} # Save the states for other use
@@ -218,7 +237,7 @@ class LPModel:
             nstates = self.last_run["states"][:, size:]
             return [nstates[:,i]/vstates[:,i] for i in range(size)]
     
-    def get_pressures(self):
+    def get_pressures(self, HR=60, f_con=0.5):
         if not hasattr(self, "last_run"):
             print("Model has not been run yet. Please run model using self.solve_model().")
         else:
@@ -231,12 +250,16 @@ class LPModel:
                 if unit.nonlinear[1]:
                     statevector = []
                     for i, t in enumerate(times):
-                        statevector.append(unit.C(vstates[:,key][i], t=t))
+                        statevector.append(unit.C(vstates[:,key][i], t=t, HR=HR, f_con=f_con))
                     pstates.append(np.array(statevector)) # This is a vector of pressures
                 else:
                     pstates.append(vstates[:,key]/unit.C*np.ones_like(times))
         
         return pstates
+
+    def analyze_physiology(self):
+        # Future feature: determine steady state stroke volume, cardiac output, blood pressures, etc.
+        pass
 
 
 class LPunit:
@@ -293,7 +316,6 @@ class LPunit:
 
 ### When not indicated these formulae and parameters are from Tang et al.
 # Key parameters
-HR = 60 # Heart rate
 [A0, B0, C0] = [0.9, 0.038, 0.145] # Activation functions for the heart
 [Aa, Ba, Ca] = [[0.3, 0.35, 0.5, 0.55], [0.045, 0.035, 0.037, 0.036], [0.275, 0.33, 0.375, 0.4]] # Activation functions for the heart
 [amin, bmin, ka, kb] = [-2, 0.7, 7, 0.5] # Acivation functions for the heart
@@ -305,39 +327,39 @@ HR = 60 # Heart rate
 [Kv, Vsmax] = [40, 3500] # Systemic vein parameters
 [n1, n2, k1, k2, kRvc, r0, vc_0, vc_max, vc_min] = [0, -5, 0.15, 0.4, 0.001, 0.025, 130, 350, 50] # Vena cava
 [n0, kc, kp1, kp2, krpsa, vsap_min, vsap_max, taop] = [50, 1000, 0.03, 0.2, 0.04, 210, 250, 0.1] # Proximal systemic artery parameters
-[f_vaso, f_con] = [0.5, 0.5]
+f_vaso = 0.5
 
 # P-V relationships for the heart using end-diastolic and end-systolic info
 # f_con is symphathetic discharge freuqency
 # These functions return a pressure given some volume
-def etvfunc(t, A, B, C, right=False):
+def etvfunc(t, A, B, C, HR=60, f_con=0.5, right=False):
     atv = 0 
     for i in range(4):
         atv += A[i] * np.exp(-(((bmin+kb*f_con)*(t%(60/HR))-(C[i]+right*.013))/B[i])**2)
     return atv
 
-def etafunc(t, A0, B0, C0, right=False):
+def etafunc(t, A0, B0, C0, HR=60, right=False):
     return A0 * np.exp(-0.5*((t%(60/HR) - (C0-right*.02))/B0)**2)
 
-def pvt_lv(vol, t):
+def pvt_lv(vol, t, HR=60, f_con=0.5):
     pES = (amin+ka*f_con)*E_eslv*(vol-v_dlv)
     pED = M_lv*np.abs(np.exp(l_lv*(vol-v_0lv))-1)
     etvl = etvfunc(t, Aa, Ba, Ca)
     return etvl*pES + (1-etvl)*pED
 
-def pvt_rv(vol, t):
+def pvt_rv(vol, t, HR=60, f_con=0.5):
     pES = (amin+ka*f_con)*E_esrv*(vol-v_drv)
     pED = M_rv*np.abs(np.exp(l_rv*(vol-v_0rv))-1)
     etvr = etvfunc(t, Aa, Ba, Ca, right=True)
     return etvr*pES + (1-etvr)*pED
 
-def pvt_la(vol, t):
+def pvt_la(vol, t, HR=60, f_con=0.5):
     pES = E_esla*(vol-v_dla)
     pED = M_la*np.abs(np.exp(l_la*(vol-v_0la))-1)
     etal = etafunc(t, A0, B0, C0)
     return etal*pES + (1-etal)*pED
 
-def pvt_ra(vol, t):
+def pvt_ra(vol, t, HR=60, f_con=0.5):
     pES = E_esra*(vol-v_dra)
     pED = M_ra*np.abs(np.exp(l_ra*(vol-v_0ra))-1)
     etar = etafunc(t, A0, B0, C0, right=True)
@@ -345,10 +367,10 @@ def pvt_ra(vol, t):
 
 # P-V relationships for some vessels
 # Write everything as a function of volume and time so time is accepted
-def pv_sysv(vol, t):
+def pv_sysv(vol, t, HR=60, f_con=0.5):
     return -Kv*np.log10(Vsmax/vol - 0.99)
 
-def pv_vena(vol, t):
+def pv_vena(vol, t, HR=60, f_con=0.5):
     if vol >= vc_0:
         return n1 + k1*(vol-vc_0)
     else:
@@ -359,7 +381,7 @@ def rv_vena(vol, t):
 
 # Proximal systemic artery is complex...
 # f_vaso is vasoconstriction (sympathetic frequency)
-def pv_proxart(vol, t):
+def pv_proxart(vol, t, HR=60, f_con=0.5):
     pv_proxart_a = kc*np.log10((vol-vsap_min)/n0+1)
     pv_proxart_p = kp1*np.exp(taop*(vol-vsap_min)) + kp2*(vol-vsap_min)**2
     return f_vaso*pv_proxart_a + (1-f_vaso)*pv_proxart_p
