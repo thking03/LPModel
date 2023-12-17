@@ -17,6 +17,7 @@ TO-DO:
 
 import numpy as np # math
 from scipy.integrate import odeint # solver method
+import time
 
 # Class definitions to easily create models
 
@@ -47,7 +48,7 @@ class LPModel:
         # Use solute setting to enable and disable decay of the solute
         self.kD = kD
 
-    def solve_model(self, dt, T):
+    def solve_model(self, dt, T, run_diagnostic=False, diagnostic_time=15):
         # dt is the number of time steps per second.
         # T is the number of seconds to run for
         # We track the volume of each unit in time & flow through inductor if inductor exists.
@@ -105,6 +106,16 @@ class LPModel:
             decayrate = 0
 
         def calc_derivative(y, t):
+            # Timing diagnostic
+            global display
+            if run_diagnostic:
+                if t % diagnostic_time < 0.1:
+                    if display:
+                        print("Got to time {} in {} s".format(t, time.time() - start))
+                        display = False
+                elif not display:
+                    display = True
+
             # Get the current state
             vols = y[:len(v0)]
             #ls = y[len(v0):len(v0)+len(l0)]
@@ -204,6 +215,11 @@ class LPModel:
             return np.concatenate((dvs, dns))
         
         t = np.linspace(0, T, int(T/dt)+1)
+
+        if run_diagnostic:
+            start = time.time()
+            display = True
+
         states = odeint(calc_derivative, ics, t)
 
         self.last_run = {"states" : states, "times": t} # Save the states for other use
@@ -237,6 +253,10 @@ class LPModel:
                     pstates.append(vstates[:,key]/unit.C*np.ones_like(times))
         
         return pstates
+
+    def analyze_physiology(self):
+        # Future feature: determine steady state stroke volume, cardiac output, blood pressures, etc.
+        pass
 
 
 class LPunit:
