@@ -39,6 +39,9 @@ The user can then generate plots that demonstrate results, or feed the numerical
 
 ![Graph of simulation results](demograph.png)
 
+## General Overview of BBB Modeling
+The code corresponding to the modeling of transport across the blood-brain barrier is contained in the `lpm_test.ipynb` file. The last two execution blocks of of this Jupyter Notebook Conduct the required calculations to show transport, automatically set to show 50s-700s. If the model of nicotine is wished to be changed, it can be adjusted with inputs as mentioned above. The execution of the preceeding code blocks are required to make this model successful.
+
 ## Files in this package
 * `lpm_circ.py`: functions and class definitions associated with the lumped parameter model
 * `diff_circ.py`: functions associated with diffusion in different regions of the body
